@@ -1,0 +1,42 @@
+# cosmic_docs_pipeline — Python dependencies
+#
+# Base deps are always installed. Provider-specific deps are commented —
+# uncomment only the ones for the providers you actually use.
+# ─────────────────────────────────────────────────────────────────────
+
+# ── Core (always) ───────────────────────────────────────────────────
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# ── LLM providers ───────────────────────────────────────────────────
+google-genai>=0.8.0
+anthropic>=0.40.0
+openai>=1.50.0
+
+# ── TTS — DEFAULT OFFLINE STACK ─────────────────────────────────────
+# Coqui XTTS v2 (DEFAULT) — offline, voice cloning, Hindi support.
+# Install note on Apple Silicon: pip install TTS may need --no-build-isolation
+# if it tries to compile deep-phonemizer from source; prefer Python 3.10/3.11.
+TTS>=0.22.0
+
+# Piper (offline, CPU-fast, no cloning)
+piper-tts>=1.2.0
+
+# ── TTS — Optional extras ───────────────────────────────────────────
+# Uncomment the ones you intend to use.
+# elevenlabs>=1.0.0                 # online premium, voice cloning via API
+# f5-tts>=0.1.0                     # offline, GPU-recommended (Phase 2)
+
+# ── Video providers ─────────────────────────────────────────────────
+# Meta AI is accessed via HTTP using requests (no SDK required).
+# Kling / Sora / Veo / Runway / WAN are also HTTP-based — stubs ship
+# with each provider so you can wire your key + endpoint when ready.
+
+# ── YouTube upload ──────────────────────────────────────────────────
+google-api-python-client>=2.100.0
+google-auth-oauthlib>=1.2.0
+google-auth-httplib2>=0.2.0
+
+# ── Optional utilities ──────────────────────────────────────────────
+# faster-whisper>=1.0.0             # offline word-level audio timestamps
+# ffmpeg-python>=0.2.0              # optional Pythonic ffmpeg wrapper

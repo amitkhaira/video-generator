@@ -1,0 +1,2 @@
+# Drop a 10-20 second clean Hindi narration sample here as `narrator.wav`
+# XTTS v2 will clone this voice for every TTS call.
