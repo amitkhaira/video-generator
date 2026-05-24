@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voiceover Automator</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────────── -->
+  <header class="header">
+    <svg class="header-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="11" y="2" width="10" height="18" rx="5" fill="#4285f4"/>
+      <path d="M6 16a10 10 0 0 0 20 0" stroke="#8ab4f8" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+      <line x1="16" y1="26" x2="16" y2="30" stroke="#8ab4f8" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="11" y1="30" x2="21" y2="30" stroke="#8ab4f8" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="5"  y1="12" x2="5"  y2="18" stroke="#4285f4" stroke-width="1.6" stroke-linecap="round" opacity="0.6"/>
+      <line x1="27" y1="12" x2="27" y2="18" stroke="#4285f4" stroke-width="1.6" stroke-linecap="round" opacity="0.6"/>
+    </svg>
+    <div class="header-text">
+      <h1>Voiceover Automator</h1>
+      <p class="header-sub">Google AI Studio · Speech</p>
+    </div>
+  </header>
+
+  <!-- ── Connection status bar ──────────────────────────────────── -->
+  <div class="status-bar" id="statusBar">
+    <span class="status-dot" id="statusDot" data-state="checking"></span>
+    <span class="status-text" id="statusText">Checking AI Studio connection…</span>
+    <button class="status-open-btn" id="openAiStudioBtn" title="Open AI Studio">Open</button>
+  </div>
+
+  <!-- ── Tabs ────────────────────────────────────────────────────── -->
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="script">Script Input</button>
+    <button class="tab-btn" data-tab="instructions">Instructions</button>
+  </nav>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TAB: Script Input
+  ═══════════════════════════════════════════════════════════════ -->
+  <section class="tab-panel active" id="script">
+
+    <div class="field-group">
+      <label class="field-label" for="jsonInput">JSON Configuration</label>
+      <textarea
+        id="jsonInput"
+        class="json-textarea"
+        rows="14"
+        spellcheck="false"
+        placeholder='{
+  "title": "My Voiceover",
+  "scene": "Scene description…",
+  "sampleContext": "Context…",
+  "clearExistingBlocks": true,
+  "outputFilename": "my_audio",
+  "speakers": [{ "speakerIndex": 0, "aliasName": "Narrator", "voice": "Alnilam", ... }],
+  "blocks": [{ "speakerIndex": 0, "text": "Your script text here." }]
+}'
+      ></textarea>
+    </div>
+
+    <div class="validation-msg" id="validationMsg"></div>
+
+    <div class="action-row">
+      <button class="btn btn-ghost" id="validateBtn">Validate JSON</button>
+      <button class="btn btn-primary" id="startBtn" disabled>Start Automation</button>
+    </div>
+
+    <!-- Progress section (hidden until automation starts) -->
+    <div class="progress-section" id="progressSection">
+      <div class="progress-header">
+        <span class="progress-title">Progress</span>
+        <span class="progress-fraction" id="progressFraction">0 / 0</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="step-msg" id="stepMsg"></div>
+    </div>
+
+  </section>
+
+  <!-- ═══════════════════════════════════════════════════════════════
+       TAB: Instructions
+  ═══════════════════════════════════════════════════════════════ -->
+  <section class="tab-panel" id="instructions">
+    <div class="instructions">
+
+      <h3>Setup</h3>
+      <ol>
+        <li>Open <a href="https://aistudio.google.com/" target="_blank" rel="noopener">Google AI Studio</a></li>
+        <li>Navigate to the <strong>Speech</strong> section</li>
+        <li>Return here, paste your JSON config, and click <strong>Start Automation</strong></li>
+      </ol>
+
+      <h3>JSON Format</h3>
+      <pre class="code-pre">{
+  "title": "Horror Story - Ep 1",
+  "scene": "Late night. Dense forest. Old mansion.",
+  "sampleContext": "Cinematic horror narration.",
+  "clearExistingBlocks": true,
+  "outputFilename": "horror_ep1",
+  "speakers": [
+    {
+      "speakerIndex": 0,
+      "aliasName": "Narrator",
+      "voice": "Alnilam",
+      "audioProfile": "Deep, resonant narrator.",
+      "style": "Whisper",
+      "pace": "Staccato",
+      "accent": "Neutral"
+    },
+    {
+      "speakerIndex": 1,
+      "aliasName": "Aryan",
+      "voice": "Alnilam",
+      "audioProfile": "Scared young man.",
+      "style": "Empathetic",
+      "pace": "Natural",
+      "accent": "Neutral"
+    }
+  ],
+  "blocks": [
+    { "speakerIndex": 0, "text": "हवेली गाँव से थोड़ा बाहर थी।" },
+    { "speakerIndex": 1, "text": "मैंने camera ऑन किया।" }
+  ]
+}</pre>
+
+      <h3>Available Options</h3>
+      <table class="options-table">
+        <tr>
+          <td class="opt-key">Style</td>
+          <td>Vocal Smile, Newscaster, Whisper, Empathetic, Promo/Hype, Deadpan</td>
+        </tr>
+        <tr>
+          <td class="opt-key">Pace</td>
+          <td>Natural, Rapid Fire, The Drift, Staccato</td>
+        </tr>
+        <tr>
+          <td class="opt-key">Accent</td>
+          <td>Neutral, American (Gen), American (Valley), American (South), British (RP), British (Brixton), Transatlantic, Australian</td>
+        </tr>
+      </table>
+
+      <h3>Notes</h3>
+      <ul>
+        <li><code>speakerIndex</code> in blocks references the <code>speakers</code> array (0-based).</li>
+        <li>Speaker settings are configured once per unique <code>speakerIndex</code>.</li>
+        <li>Set <code>clearExistingBlocks: true</code> to wipe the slate before starting.</li>
+        <li>The extension renames downloaded files using <code>outputFilename</code>.</li>
+        <li>Audio generation may take 30 s – 3 min depending on script length.</li>
+      </ul>
+
+    </div>
+  </section>
+
+  <script src="popup.js"></script>
+</body>
+</html>

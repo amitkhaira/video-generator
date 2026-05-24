@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Voiceover Automator</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+
+  <header class="header">
+    <svg class="header-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="11" y="2" width="10" height="18" rx="5" fill="#4285f4"/>
+      <path d="M6 16a10 10 0 0 0 20 0" stroke="#8ab4f8" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+      <line x1="16" y1="26" x2="16" y2="30" stroke="#8ab4f8" stroke-width="2.2" stroke-linecap="round"/>
+      <line x1="11" y1="30" x2="21" y2="30" stroke="#8ab4f8" stroke-width="2.2" stroke-linecap="round"/>
+    </svg>
+    <div class="header-text">
+      <h1>Voiceover Automator</h1>
+      <p class="header-sub">Google AI Studio · Batch Speech</p>
+    </div>
+  </header>
+
+  <div class="status-bar" id="statusBar">
+    <span class="status-dot" id="statusDot" data-state="checking"></span>
+    <span class="status-text" id="statusText">Checking AI Studio connection…</span>
+    <button class="status-open-btn" id="openAiStudioBtn" title="Open AI Studio">Open</button>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="queue">Queue</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+    <button class="tab-btn" data-tab="instructions">Help</button>
+  </nav>
+
+  <section class="tab-panel active" id="queue">
+    <div class="field-group">
+      <label class="field-label" for="projectName">Project folder</label>
+      <input type="text" id="projectName" class="text-input" placeholder="horror_ep1" spellcheck="false" />
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="jsonInput">Phase JSON</label>
+      <textarea id="jsonInput" class="json-textarea" rows="12" spellcheck="false"
+        placeholder='[{ "phase": 1, "scene_title": "...", "scene_description": "...", ... }]'></textarea>
+    </div>
+
+    <div class="validation-msg" id="validationMsg"></div>
+
+    <div class="action-row">
+      <button class="btn btn-ghost" id="validateBtn">Validate</button>
+      <button class="btn btn-primary" id="startBtn" disabled>Start Queue</button>
+      <button class="btn btn-danger" id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="action-row secondary-row">
+      <button class="btn btn-ghost" id="retryFailedBtn" disabled>Retry Failures (0)</button>
+    </div>
+
+    <div class="queue-section" id="queueSection">
+      <div class="queue-header">
+        <span class="queue-title">Job Queue</span>
+        <span class="queue-summary" id="queueSummary">0 jobs</span>
+      </div>
+      <ul class="queue-list" id="queueList"></ul>
+    </div>
+
+    <div class="progress-section" id="progressSection">
+      <div class="progress-header">
+        <span class="progress-title">Current Job</span>
+        <span class="progress-fraction" id="progressFraction">0 / 0</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="step-msg" id="stepMsg"></div>
+    </div>
+  </section>
+
+  <section class="tab-panel" id="settings">
+    <div class="settings-grid">
+      <div class="field-group">
+        <label class="field-label" for="maxRetries">Max retries per phase</label>
+        <input type="number" id="maxRetries" class="text-input" min="0" max="20" value="3" />
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="failureRetryMax">Max retries (Retry Failures button)</label>
+        <input type="number" id="failureRetryMax" class="text-input" min="0" max="20" value="3" />
+        <p class="field-hint">Used when you click Retry Failures after a queue finishes with errors.</p>
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="jobDelaySec">Delay between phases (sec)</label>
+        <input type="number" id="jobDelaySec" class="text-input" min="0" max="300" value="5" />
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="concurrency">Concurrency</label>
+        <input type="number" id="concurrency" class="text-input" min="1" max="3" value="1" />
+        <p class="field-hint">Speech generation runs on one AI Studio tab — keep at 1 for stability.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab-panel" id="instructions">
+    <div class="instructions">
+      <h3>Setup</h3>
+      <ol>
+        <li>Open <a href="https://aistudio.google.com/" target="_blank" rel="noopener">Google AI Studio</a></li>
+        <li>Go to the <strong>Speech</strong> page</li>
+        <li>Paste your phase JSON, validate, then click <strong>Start Queue</strong></li>
+      </ol>
+
+      <h3>JSON format</h3>
+      <p class="hint">Array of phases, or wrapper with <code>projectName</code> + <code>phases</code>.</p>
+      <pre class="code-pre">[
+  {
+    "phase": 1,
+    "scene_title": "The Anonymous Delivery",
+    "scene_description": "Aarav receives a VHS tape…",
+    "sample_context": "Indian psychological horror…",
+    "audio_blocks": [
+      {
+        "speaker_id": 1,
+        "character_name": "Aarav Mehra",
+        "audio_profile": "Deep narrator voice…",
+        "directors_note": {
+          "style": "Whisper",
+          "pace": "Staccato",
+          "accent": "Neutral"
+        },
+        "voice": "Alnilam",
+        "dialogue": "It didn't have a return address…"
+      }
+    ]
+  }
+]</pre>
+
+      <h3>Downloads</h3>
+      <ul>
+        <li>Files save to <code>&lt;project folder&gt;/01_scene_title.wav</code></li>
+        <li>Disable Chrome “Ask where to save each file” for smooth auto-download</li>
+      </ul>
+    </div>
+  </section>
+
+  <script src="../lib/phaseAdapter.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>

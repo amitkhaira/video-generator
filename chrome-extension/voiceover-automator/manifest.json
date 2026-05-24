@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "Voiceover Automator",
+  "version": "2.0.3",
+  "description": "Batch multi-phase voiceover generation on Google AI Studio Speech with queue, retry, and project downloads.",
+  "icons": {
+    "16": "icons/icon.svg",
+    "48": "icons/icon.svg",
+    "128": "icons/icon.svg"
+  },
+  "action": {
+    "default_icon": "icons/icon.svg",
+    "default_title": "Voiceover Automator"
+  },
+  "side_panel": {
+    "default_path": "sidepanel/sidepanel.html"
+  },
+  "background": {
+    "service_worker": "background/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://aistudio.google.com/*"],
+      "js": ["content/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "permissions": [
+    "storage",
+    "downloads",
+    "tabs",
+    "activeTab",
+    "scripting",
+    "sidePanel"
+  ],
+  "host_permissions": [
+    "https://aistudio.google.com/*"
+  ]
+}
