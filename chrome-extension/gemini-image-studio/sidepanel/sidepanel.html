@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gemini Image Studio</title>
+  <link rel="stylesheet" href="sidepanel.css" />
+</head>
+<body>
+
+  <header class="header">
+    <svg class="header-icon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <rect x="4" y="6" width="24" height="18" rx="3" fill="#1a3a6e" stroke="#4285f4" stroke-width="1.2"/>
+      <circle cx="11" cy="13" r="3" fill="#34a853"/>
+      <path d="M6 20 L13 14 L18 17 L24 11 L27 14" stroke="#8ab4f8" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    </svg>
+    <div class="header-text">
+      <h1>Gemini Image Studio</h1>
+      <p class="header-sub">Batch image generation · Project downloads</p>
+    </div>
+  </header>
+
+  <div class="status-bar" id="statusBar">
+    <span class="status-dot" id="statusDot" data-state="checking"></span>
+    <span class="status-text" id="statusText">Checking Gemini connection…</span>
+    <button class="status-open-btn" id="openGeminiBtn" title="Open Gemini">Open</button>
+  </div>
+
+  <nav class="tabs">
+    <button class="tab-btn active" data-tab="queue">Queue</button>
+    <button class="tab-btn" data-tab="gallery">Gallery</button>
+    <button class="tab-btn" data-tab="settings">Settings</button>
+    <button class="tab-btn" data-tab="help">Help</button>
+  </nav>
+
+  <section class="tab-panel active" id="queue">
+    <div class="field-group">
+      <label class="field-label" for="projectName">Project folder</label>
+      <input type="text" id="projectName" class="text-input" placeholder="fantasy_movie" spellcheck="false" />
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="sceneInput">Scenes (Script, JSON, or CSV)</label>
+      <textarea id="sceneInput" class="json-textarea" rows="14" spellcheck="false"
+        placeholder='Scene 1:
+Characters Present: Aman, Neha, Sarita
+Image Prompt:
+Old three-floor ancestral house on Delhi outskirts during heavy midnight rain…
+
+Scene 2:
+Characters Present: Aman
+Image Prompt:
+Empty corridor lit by flickering bulb…'></textarea>
+    </div>
+
+    <div class="validation-msg" id="validationMsg"></div>
+
+    <div class="action-row">
+      <button class="btn btn-ghost" id="validateBtn">Validate</button>
+      <button class="btn btn-primary" id="startBtn" disabled>Start Queue</button>
+      <button class="btn btn-danger" id="stopBtn" disabled>Stop</button>
+    </div>
+
+    <div class="action-row secondary-row">
+      <button class="btn btn-ghost" id="retryFailedBtn" disabled>Retry Failures (0)</button>
+    </div>
+
+    <div class="queue-section" id="queueSection">
+      <div class="queue-header">
+        <span class="queue-title">Scene Queue</span>
+        <span class="queue-summary" id="queueSummary">0 scenes</span>
+      </div>
+      <ul class="queue-list" id="queueList"></ul>
+    </div>
+
+    <div class="progress-section" id="progressSection">
+      <div class="progress-header">
+        <span class="progress-title">Current Scene</span>
+        <span class="progress-fraction" id="progressFraction">0 / 0</span>
+      </div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill" style="width: 0%"></div>
+      </div>
+      <div class="step-msg" id="stepMsg"></div>
+    </div>
+  </section>
+
+  <section class="tab-panel" id="gallery">
+    <p class="gallery-intro">Download every generated image visible in the current Gemini chat.</p>
+
+    <div class="field-group">
+      <label class="field-label" for="galleryProjectName">Export folder</label>
+      <input type="text" id="galleryProjectName" class="text-input" placeholder="chat_export" spellcheck="false" />
+    </div>
+
+    <div class="gallery-stats" id="galleryStats">Scan the chat to see available images.</div>
+
+    <div class="action-row">
+      <button class="btn btn-ghost" id="scanBtn">Scan Chat</button>
+      <button class="btn btn-primary" id="downloadAllBtn" disabled>Download All</button>
+    </div>
+
+    <ul class="gallery-list" id="galleryList"></ul>
+  </section>
+
+  <section class="tab-panel" id="settings">
+    <div class="settings-grid">
+      <div class="field-group">
+        <label class="field-label" for="maxRetries">Max retries per scene</label>
+        <input type="number" id="maxRetries" class="text-input" min="0" max="20" value="3" />
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="failureRetryMax">Max retries (Retry Failures)</label>
+        <input type="number" id="failureRetryMax" class="text-input" min="0" max="20" value="3" />
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="jobDelaySec">Delay between scenes (sec)</label>
+        <input type="number" id="jobDelaySec" class="text-input" min="0" max="300" value="8" />
+      </div>
+      <div class="field-group">
+        <label class="field-label" for="generationTimeoutSec">Generation timeout (sec)</label>
+        <input type="number" id="generationTimeoutSec" class="text-input" min="30" max="600" value="180" />
+        <p class="field-hint">How long to wait for Gemini to finish generating each image.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="tab-panel" id="help">
+    <div class="instructions">
+      <h3>Setup</h3>
+      <ol>
+        <li>Open <a href="https://gemini.google.com/app" target="_blank" rel="noopener">gemini.google.com</a></li>
+        <li>Start a chat and enable image generation (ask Gemini to create images)</li>
+        <li>Paste your scene script, JSON, or CSV, validate, then click <strong>Start Queue</strong></li>
+      </ol>
+
+      <h3>Script format (recommended)</h3>
+      <pre class="code-pre">Scene 1:
+Characters Present: Aman, Neha, Sarita
+Image Prompt:
+Old three-floor ancestral house on Delhi outskirts…
+
+Scene 2:
+Characters Present: Aman
+Image Prompt:
+Empty corridor lit by flickering bulb…</pre>
+
+      <h3>CSV format</h3>
+      <pre class="code-pre">scene,characters_present,image_prompt
+Scene 1,"Aman, Neha, Sarita","Old three-floor ancestral house…"
+Scene 2,Aman,"Empty corridor lit by flickering bulb…"</pre>
+
+      <h3>JSON format</h3>
+      <pre class="code-pre">{
+  "projectName": "horror_ep1",
+  "scenes": [
+    {
+      "scene": "Scene 1",
+      "characters_present": "Aman, Neha, Sarita",
+      "image_prompt": "Old three-floor ancestral house…"
+    }
+  ]
+}</pre>
+
+      <h3>Downloads</h3>
+      <ul>
+        <li>Files save to <code>&lt;project&gt;/01_scene_name.png</code></li>
+        <li>Metadata is stored in extension storage per project</li>
+        <li>Disable Chrome “Ask where to save each file” for smooth auto-download</li>
+      </ul>
+
+      <h3>Tips</h3>
+      <ul>
+        <li>Keep one Gemini tab open during batch runs</li>
+        <li>Use descriptive scene names for auto file naming</li>
+        <li>Use the Gallery tab to bulk-export an existing chat</li>
+      </ul>
+    </div>
+  </section>
+
+  <script src="../lib/sceneAdapter.js"></script>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
