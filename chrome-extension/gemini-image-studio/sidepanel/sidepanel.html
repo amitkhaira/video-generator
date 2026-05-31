@@ -28,6 +28,8 @@
 
   <nav class="tabs">
     <button class="tab-btn active" data-tab="queue">Queue</button>
+    <button class="tab-btn" data-tab="studio">Studio</button>
+    <button class="tab-btn" data-tab="export">Export</button>
     <button class="tab-btn" data-tab="gallery">Gallery</button>
     <button class="tab-btn" data-tab="settings">Settings</button>
     <button class="tab-btn" data-tab="help">Help</button>
@@ -73,6 +75,10 @@ Empty corridor lit by flickering bulb…'></textarea>
       <ul class="queue-list" id="queueList"></ul>
     </div>
 
+    <div class="export-inline" id="exportInline">
+      <span class="export-inline-label" id="projectAssetInfo">No stored assets yet.</span>
+    </div>
+
     <div class="progress-section" id="progressSection">
       <div class="progress-header">
         <span class="progress-title">Current Scene</span>
@@ -83,6 +89,79 @@ Empty corridor lit by flickering bulb…'></textarea>
       </div>
       <div class="step-msg" id="stepMsg"></div>
     </div>
+  </section>
+
+  <section class="tab-panel" id="studio">
+    <p class="gallery-intro">Templates, character profiles, and reference images applied to every queued scene.</p>
+
+    <div class="field-group">
+      <label class="field-label" for="promptTemplate">Prompt template</label>
+      <textarea id="promptTemplate" class="json-textarea studio-textarea" rows="6" spellcheck="false">Characters Present: {{characters_present}}
+
+{{image_prompt}}</textarea>
+      <p class="field-hint">Variables: <code>{{scene}}</code> <code>{{characters_present}}</code> <code>{{image_prompt}}</code> <code>{{character}}</code> <code>{{location}}</code> <code>{{action}}</code> <code>{{style}}</code></p>
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="stylePrefix">Global style prefix</label>
+      <input type="text" id="stylePrefix" class="text-input" placeholder="cinematic realism, moody shadows, Indian psychological horror" spellcheck="false" />
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="characterLibrary">Character library (JSON)</label>
+      <textarea id="characterLibrary" class="json-textarea studio-textarea" rows="8" spellcheck="false">{
+  "Aman": {
+    "appearance": "Young Indian man, tense jaw, fearful eyes, casual night clothes",
+    "style": "grounded realism"
+  },
+  "Neha": {
+    "appearance": "Young Indian woman, oversized night clothes, anxious expression",
+    "style": "soft desaturated tones"
+  }
+}</textarea>
+      <p class="field-hint">Names matching <strong>Characters Present</strong> in scenes are auto-appended to prompts.</p>
+    </div>
+
+    <div class="field-group">
+      <label class="field-label">Reference images</label>
+      <input type="file" id="referenceUpload" accept="image/*" multiple class="file-input" />
+      <ul class="ref-list" id="referenceList"></ul>
+      <p class="field-hint">Selected references are uploaded to Gemini before each scene prompt.</p>
+    </div>
+
+    <div class="action-row">
+      <button class="btn btn-primary" id="saveStudioBtn">Save Studio Config</button>
+    </div>
+    <div class="validation-msg" id="studioMsg"></div>
+  </section>
+
+  <section class="tab-panel" id="export">
+    <p class="gallery-intro">Export stored project assets as metadata JSON files or a full ZIP bundle.</p>
+
+    <div class="field-group">
+      <label class="field-label" for="exportProjectName">Project to export</label>
+      <input type="text" id="exportProjectName" class="text-input" placeholder="horror_ep1" spellcheck="false" />
+    </div>
+
+    <div class="gallery-stats" id="exportStats">Enter a project name to see stored assets.</div>
+
+    <div class="action-row">
+      <button class="btn btn-ghost" id="refreshExportBtn">Refresh</button>
+      <button class="btn btn-ghost" id="exportMetadataBtn">Export Metadata JSON</button>
+    </div>
+    <div class="action-row">
+      <button class="btn btn-primary" id="exportZipBtn">Download ZIP</button>
+    </div>
+
+    <div class="validation-msg" id="exportMsg"></div>
+
+    <h3 class="section-subtitle">ZIP contents</h3>
+    <ul class="help-list">
+      <li><code>Images/</code> — all generated PNG/JPG files</li>
+      <li><code>Metadata/manifest.json</code> — full project manifest</li>
+      <li><code>Metadata/scenes/</code> — per-scene JSON sidecars</li>
+      <li><code>Prompts/all_prompts.txt</code> — plain-text prompt archive</li>
+    </ul>
   </section>
 
   <section class="tab-panel" id="gallery">
@@ -106,6 +185,11 @@ Empty corridor lit by flickering bulb…'></textarea>
   <section class="tab-panel" id="settings">
     <div class="settings-grid">
       <div class="field-group">
+        <label class="field-label" for="providerSelect">Image provider</label>
+        <select id="providerSelect" class="text-input"></select>
+        <p class="field-hint" id="providerHint">Only Gemini is active. Others are planned.</p>
+      </div>
+      <div class="field-group">
         <label class="field-label" for="maxRetries">Max retries per scene</label>
         <input type="number" id="maxRetries" class="text-input" min="0" max="20" value="3" />
       </div>
@@ -122,6 +206,16 @@ Empty corridor lit by flickering bulb…'></textarea>
         <input type="number" id="generationTimeoutSec" class="text-input" min="30" max="600" value="180" />
         <p class="field-hint">How long to wait for Gemini to finish generating each image.</p>
       </div>
+      <div class="field-group">
+        <label class="checkbox-row">
+          <input type="checkbox" id="exportMetadataOnComplete" checked />
+          <span>Auto-export metadata JSON when queue finishes</span>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" id="exportZipOnComplete" />
+          <span>Auto-download ZIP when queue finishes</span>
+        </label>
+      </div>
     </div>
   </section>
 
@@ -129,8 +223,9 @@ Empty corridor lit by flickering bulb…'></textarea>
     <div class="instructions">
       <h3>Setup</h3>
       <ol>
-        <li>Open <a href="https://gemini.google.com/app" target="_blank" rel="noopener">gemini.google.com</a></li>
-        <li>Start a chat and enable image generation (ask Gemini to create images)</li>
+        <li>Open your provider: <a href="https://gemini.google.com/app" target="_blank" rel="noopener">Gemini</a> or <a href="https://chatgpt.com/" target="_blank" rel="noopener">ChatGPT</a></li>
+        <li>Select the provider in <strong>Settings</strong></li>
+        <li>Start a chat with image generation enabled</li>
         <li>Paste your scene script, JSON, or CSV, validate, then click <strong>Start Queue</strong></li>
       </ol>
 
@@ -162,11 +257,32 @@ Scene 2,Aman,"Empty corridor lit by flickering bulb…"</pre>
   ]
 }</pre>
 
-      <h3>Downloads</h3>
+      <h3>Studio (Phase 3)</h3>
       <ul>
-        <li>Files save to <code>&lt;project&gt;/01_scene_name.png</code></li>
-        <li>Metadata is stored in extension storage per project</li>
+        <li><strong>Templates</strong> — wrap prompts with <code>{{variables}}</code></li>
+        <li><strong>Character library</strong> — auto-append appearance/style for named characters</li>
+        <li><strong>Reference images</strong> — uploaded before each scene for consistency</li>
+      </ul>
+
+      <h3>Export (Phase 2)</h3>
+      <ul>
+        <li>Images save to <code>&lt;project&gt;/01_scene_name.png</code></li>
+        <li>Metadata JSON saves to <code>&lt;project&gt;/Metadata/</code></li>
+        <li>ZIP bundle includes Images + Metadata + Prompts</li>
         <li>Disable Chrome “Ask where to save each file” for smooth auto-download</li>
+      </ul>
+
+      <h3>Providers</h3>
+      <ul>
+        <li><strong>Gemini</strong> — gemini.google.com (image generation chat)</li>
+        <li><strong>ChatGPT</strong> — chatgpt.com (GPT-4o / Images — ask it to create images)</li>
+      </ul>
+
+      <h3>ChatGPT tips</h3>
+      <ul>
+        <li>Use a model that supports image generation (GPT-4o, Images)</li>
+        <li>Start a fresh chat before batch runs for best results</li>
+        <li>Prompts like “Create an image of …” work reliably</li>
       </ul>
 
       <h3>Tips</h3>

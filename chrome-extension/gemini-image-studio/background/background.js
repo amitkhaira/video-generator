@@ -1,19 +1,31 @@
 /**
  * Gemini Image Studio — Background Service Worker
- * Queue orchestration, download renaming, metadata storage.
  */
 
 'use strict';
 
-importScripts('../lib/sceneAdapter.js');
+importScripts(
+  '../lib/jszip.min.js',
+  '../lib/sceneAdapter.js',
+  '../lib/projectStore.js',
+  '../lib/exportEngine.js',
+  '../lib/promptEngine.js',
+  '../lib/providers/geminiProvider.js',
+  '../lib/providers/chatgptProvider.js',
+  '../lib/providers/providerRegistry.js'
+);
+
+ExportEngine.init({
+  pushDownloadRename: (entry) => downloadRenameQueue.push(entry),
+});
 
 const LOG = '[Gemini Image Studio BG]';
 
-/** @type {object} */
 let queueState = {
   running: false,
   stopRequested: false,
   projectName: 'gemini_project',
+  providerId: 'gemini',
   settings: { ...SceneAdapter.DEFAULT_SETTINGS },
   jobs: [],
   tabId: null,
@@ -22,7 +34,6 @@ let queueState = {
 };
 
 const downloadRenameQueue = [];
-/** @type {Map<string, { resolve: Function, promise: Promise }>} */
 const downloadStartWatchers = new Map();
 
 chrome.sidePanel
@@ -36,6 +47,8 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
         jobId: message.jobId || `job_${Date.now()}`,
         projectName: message.projectName || 'gemini_project',
         filename: message.filename || 'image',
+        relativePath: message.relativePath || null,
+        forceExt: message.forceExt || null,
         metadata: message.metadata || null,
       });
       sendResponse({ ok: true });
@@ -55,6 +68,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
 
+    case 'STORE_PROJECT_ASSET': {
+      storeProjectAsset(message)
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
     case 'SAVE_METADATA': {
       appendMetadata(message.projectName, message.entry)
         .then(() => sendResponse({ ok: true }))
@@ -62,15 +82,92 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       return true;
     }
 
-    case 'DOWNLOAD_DATA_URL': {
-      downloadDataUrl(message)
+    case 'EXPORT_METADATA': {
+      exportMetadata(message.projectName, message.providerId)
         .then((result) => sendResponse(result))
         .catch((err) => sendResponse({ ok: false, error: err.message }));
       return true;
     }
 
+    case 'EXPORT_ZIP': {
+      ExportEngine.exportProjectZip(message.projectName, message.providerId)
+        .then((downloadId) => sendResponse({ ok: true, downloadId }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'GET_PROJECT_INFO': {
+      getProjectInfo(message.projectName)
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'GET_PROVIDERS': {
+      sendResponse({ ok: true, providers: ProviderRegistry.list() });
+      break;
+    }
+
+    case 'GET_STUDIO_CONFIG': {
+      PromptEngine.loadStudioConfig()
+        .then((config) => sendResponse({ ok: true, config }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'SAVE_STUDIO_CONFIG': {
+      PromptEngine.saveStudioConfig(message.config || {})
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'LIST_REFERENCES': {
+      ProjectStore.listReferences()
+        .then((refs) => sendResponse({ ok: true, references: refs.map(publicReference) }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'SAVE_REFERENCE': {
+      ProjectStore.putReference(message)
+        .then((ref) => sendResponse({ ok: true, reference: publicReference(ref) }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'DELETE_REFERENCE': {
+      ProjectStore.deleteReference(message.id)
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'GET_REFERENCE_DATA': {
+      ProjectStore.getReference(message.id)
+        .then((ref) => {
+          if (!ref) return sendResponse({ ok: false, error: 'Reference not found.' });
+          sendResponse({
+            ok: true,
+            reference: {
+              ...publicReference(ref),
+              dataUrl: ProjectStore.bufferToDataUrl(ref.buffer, ref.mime),
+            },
+          });
+        })
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
+    case 'OPEN_PROVIDER': {
+      ProviderRegistry.openProvider(message.providerId || 'gemini')
+        .then(() => sendResponse({ ok: true }))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
     case 'OPEN_GEMINI': {
-      openOrFocusGemini().then(() => sendResponse({ ok: true }));
+      ProviderRegistry.openProvider('gemini').then(() => sendResponse({ ok: true }));
       return true;
     }
 
@@ -129,6 +226,76 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   return true;
 });
 
+function publicReference(ref) {
+  return {
+    id: ref.id,
+    name: ref.name,
+    mime: ref.mime,
+    savedAt: ref.savedAt,
+  };
+}
+
+async function storeProjectAsset(message) {
+  const ext = message.ext || '.png';
+  const record = await ProjectStore.putAsset({
+    projectName: message.projectName,
+    filename: message.filename,
+    ext,
+    mime: message.mime,
+    dataUrl: message.dataUrl,
+    metadata: {
+      ...(message.metadata || {}),
+      provider: message.providerId || queueState.providerId,
+      saved_at: new Date().toISOString(),
+    },
+  });
+
+  return { ok: true, id: record.id };
+}
+
+async function appendMetadata(projectName, entry) {
+  const key = `metadata_${ProjectStore.sanitizeProject(projectName)}`;
+  const stored = await chrome.storage.local.get(key);
+  const list = Array.isArray(stored[key]) ? stored[key] : [];
+  list.push({ ...entry, saved_at: entry.saved_at || new Date().toISOString() });
+  await chrome.storage.local.set({ [key]: list });
+}
+
+async function getProjectInfo(projectName) {
+  const safe = ProjectStore.sanitizeProject(projectName);
+  const assets = await ProjectStore.listProjectAssets(safe);
+  const key = `metadata_${safe}`;
+  const stored = await chrome.storage.local.get(key);
+  return {
+    ok: true,
+    projectName: safe,
+    assetCount: assets.length,
+    metadataCount: (stored[key] || []).length,
+    assets: assets.map((a) => ({
+      filename: `${a.filename}${a.ext}`,
+      scene: a.metadata?.scene,
+      savedAt: a.savedAt,
+    })),
+  };
+}
+
+async function exportMetadata(projectName, providerId) {
+  const safe = ProjectStore.sanitizeProject(projectName);
+  const assets = await ProjectStore.listProjectAssets(safe);
+  if (!assets.length) throw new Error(`No assets stored for "${safe}".`);
+
+  return ExportEngine.exportMetadataFiles(
+    safe,
+    assets.map((a) => ({
+      filename: a.filename,
+      ext: a.ext,
+      metadata: a.metadata,
+      savedAt: a.savedAt,
+    })),
+    providerId || 'gemini'
+  );
+}
+
 function armDownloadWatcher(jobId) {
   clearDownloadWatcher(jobId);
   let resolveFn;
@@ -180,47 +347,29 @@ chrome.downloads.onDeterminingFilename.addListener((downloadItem, suggest) => {
     return;
   }
 
+  const folder = ProjectStore.sanitizeProject(next.projectName || 'gemini_project');
+
+  if (next.relativePath) {
+    const path = `${folder}/${next.relativePath}`;
+    suggest({ filename: path, conflictAction: 'uniquify' });
+    return;
+  }
+
   const originalName = downloadItem.filename || downloadItem.url || '';
   const dotIndex = originalName.lastIndexOf('.');
-  const ext = dotIndex !== -1 ? originalName.substring(dotIndex) : '.png';
-
-  const folder = (next.projectName || 'gemini_project').replace(/[/\\]+/g, '_');
+  const ext = next.forceExt || (dotIndex !== -1 ? originalName.substring(dotIndex) : '.png');
   const base = (next.filename || 'image').replace(/[/\\]+/g, '_');
   const newFilename = `${folder}/${base}${ext}`;
 
-  console.log(LOG, `Renaming → "${newFilename}" (${next.jobId})`);
   suggest({ filename: newFilename, conflictAction: 'uniquify' });
 });
-
-async function appendMetadata(projectName, entry) {
-  const key = `metadata_${(projectName || 'gemini_project').replace(/[/\\]+/g, '_')}`;
-  const stored = await chrome.storage.local.get(key);
-  const list = Array.isArray(stored[key]) ? stored[key] : [];
-  list.push({ ...entry, saved_at: new Date().toISOString() });
-  await chrome.storage.local.set({ [key]: list });
-}
-
-async function downloadDataUrl({ dataUrl, filename, projectName, jobId }) {
-  downloadRenameQueue.push({
-    jobId: jobId || `dl_${Date.now()}`,
-    projectName: projectName || 'gemini_project',
-    filename: filename || 'image',
-  });
-
-  const downloadId = await chrome.downloads.download({
-    url: dataUrl,
-    saveAs: false,
-    conflictAction: 'uniquify',
-  });
-
-  return { ok: true, downloadId };
-}
 
 function getPublicQueueState() {
   return {
     running: queueState.running,
     stopRequested: queueState.stopRequested,
     projectName: queueState.projectName,
+    providerId: queueState.providerId,
     settings: queueState.settings,
     jobs: queueState.jobs.map((j) => ({
       id: j.id,
@@ -262,32 +411,58 @@ async function startQueue(payload) {
   const parsed = SceneAdapter.parseInput(payload.rawInput ?? payload.rawJson ?? '');
   if (!parsed.ok) throw new Error(parsed.errors.join(' '));
 
+  const studioConfig = await PromptEngine.loadStudioConfig();
+  const enrichedJobs = PromptEngine.enrichJobs(parsed.jobs, studioConfig);
+
   const settings = {
     ...SceneAdapter.DEFAULT_SETTINGS,
     ...(payload.settings || parsed.settings || {}),
   };
+
+  const providerId = payload.providerId || settings.providerId || 'gemini';
+  const provider = ProviderRegistry.get(providerId);
+  if (provider.status !== 'active') {
+    throw new Error(`Provider "${provider.name}" is not available yet (${provider.status}).`);
+  }
+
+  if (provider.jobDelaySec && !payload.settings?.jobDelaySec) {
+    settings.jobDelaySec = provider.jobDelaySec;
+  }
+  if (provider.generationTimeoutSec && !payload.settings?.generationTimeoutSec) {
+    settings.generationTimeoutSec = provider.generationTimeoutSec;
+  }
 
   const projectName =
     (payload.projectName && String(payload.projectName).trim()) ||
     parsed.projectName ||
     'gemini_project';
 
-  const tabId = await resolveGeminiTabId(payload.tabId);
+  const tabId = await ProviderRegistry.resolveTabId(payload.tabId, providerId);
   if (!tabId) {
-    throw new Error('No Gemini tab found. Open gemini.google.com and start a chat first.');
+    throw new Error(`No ${provider.name} tab found. Open ${provider.openUrl} first.`);
   }
+
+  const referenceData = await loadReferenceData(studioConfig.activeReferenceIds);
 
   queueState = {
     running: true,
     stopRequested: false,
     projectName,
+    providerId,
     settings,
     tabId,
     activeSlots: 0,
     pending: [],
-    jobs: parsed.jobs.map((config, index) => ({
+    jobs: enrichedJobs.map((config, index) => ({
       id: `job_${index}_${Date.now()}`,
-      config: { ...config, projectName, settings: { ...settings } },
+      config: {
+        ...config,
+        projectName,
+        providerId,
+        settings: { ...settings },
+        referenceImages: referenceData,
+        provider,
+      },
       status: 'pending',
       attempts: 0,
       error: null,
@@ -296,9 +471,26 @@ async function startQueue(payload) {
   };
 
   queueState.pending = [...queueState.jobs];
-  console.log(LOG, `Queue started: ${queueState.jobs.length} scene(s), project="${projectName}"`);
+  console.log(LOG, `Queue started: ${queueState.jobs.length} scene(s), provider=${providerId}`);
   broadcastQueueUpdate();
   pumpQueue();
+}
+
+async function loadReferenceData(ids) {
+  if (!ids?.length) return [];
+  const refs = [];
+  for (const id of ids) {
+    const ref = await ProjectStore.getReference(id);
+    if (ref) {
+      refs.push({
+        id: ref.id,
+        name: ref.name,
+        mime: ref.mime,
+        dataUrl: ProjectStore.bufferToDataUrl(ref.buffer, ref.mime),
+      });
+    }
+  }
+  return refs;
 }
 
 async function retryFailedJobs(payload) {
@@ -307,12 +499,18 @@ async function retryFailedJobs(payload) {
   const failedJobs = queueState.jobs.filter((j) => j.status === 'failed');
   if (!failedJobs.length) throw new Error('No failed scenes to retry.');
 
-  const tabId = await resolveGeminiTabId(payload.tabId || queueState.tabId);
-  if (!tabId) throw new Error('No Gemini tab found.');
+  const tabId = await ProviderRegistry.resolveTabId(
+    payload.tabId || queueState.tabId,
+    queueState.providerId
+  );
+  if (!tabId) throw new Error('Provider tab not found.');
 
   queueState.settings = {
     ...queueState.settings,
-    maxRetries: Math.max(0, Math.min(20, payload.failureRetryMax ?? queueState.settings.failureRetryMax ?? 3)),
+    maxRetries: Math.max(
+      0,
+      Math.min(20, payload.failureRetryMax ?? queueState.settings.failureRetryMax ?? 3)
+    ),
     ...(payload.settings || {}),
   };
   queueState.tabId = tabId;
@@ -351,31 +549,13 @@ function stopQueue() {
   if (queueState.activeSlots === 0) finishQueue('stopped');
 }
 
-async function resolveGeminiTabId(preferredTabId) {
-  if (preferredTabId) {
-    try {
-      const tab = await chrome.tabs.get(preferredTabId);
-      if (tab?.url?.includes('gemini.google.com')) return tab.id;
-    } catch (_) {}
-  }
-
-  const tabs = await chrome.tabs.query({ url: 'https://gemini.google.com/*' });
-  return tabs.length ? tabs[0].id : null;
-}
-
 function pumpQueue() {
   if (queueState.stopRequested) {
     finishQueue('stopped');
     return;
   }
 
-  const concurrency = Math.max(1, Math.min(1, queueState.settings.concurrency || 1));
-
-  while (
-    queueState.activeSlots < concurrency &&
-    queueState.pending.length > 0 &&
-    !queueState.stopRequested
-  ) {
+  while (queueState.activeSlots < 1 && queueState.pending.length > 0 && !queueState.stopRequested) {
     runJob(queueState.pending.shift());
   }
 
@@ -445,7 +625,6 @@ function handleSceneError(jobId, error, step, stopped = false) {
     queueState.activeSlots = Math.max(0, queueState.activeSlots - 1);
 
     const delayMs = Math.min(60000, 5000 * Math.pow(2, job.attempts - 1));
-    console.warn(LOG, `Retry ${jobId} in ${delayMs}ms: ${error}`);
     setTimeout(() => {
       if (queueState.stopRequested || !queueState.running) return;
       queueState.pending.unshift(job);
@@ -476,12 +655,16 @@ function scheduleNextPump() {
   }, delayMs);
 }
 
-function finishQueue(reason) {
+async function finishQueue(reason) {
   const summary = {
     total: queueState.jobs.length,
     done: queueState.jobs.filter((j) => j.status === 'done').length,
     failed: queueState.jobs.filter((j) => j.status === 'failed').length,
   };
+
+  const projectName = queueState.projectName;
+  const providerId = queueState.providerId;
+  const settings = { ...queueState.settings };
 
   queueState.running = false;
   queueState.stopRequested = false;
@@ -493,17 +676,18 @@ function finishQueue(reason) {
     .sendMessage({ type: 'QUEUE_FINISHED', reason, summary, state: getPublicQueueState() })
     .catch(() => {});
 
-  console.log(LOG, `Queue finished (${reason}):`, summary);
-}
-
-async function openOrFocusGemini() {
-  const tabs = await chrome.tabs.query({ url: 'https://gemini.google.com/*' });
-
-  if (tabs.length > 0) {
-    const tab = tabs[0];
-    await chrome.tabs.update(tab.id, { active: true });
-    await chrome.windows.update(tab.windowId, { focused: true });
-  } else {
-    await chrome.tabs.create({ url: 'https://gemini.google.com/app' });
+  if (summary.done > 0) {
+    try {
+      if (settings.exportMetadataOnComplete !== false) {
+        await exportMetadata(projectName, providerId);
+      }
+      if (settings.exportZipOnComplete) {
+        await ExportEngine.exportProjectZip(projectName, providerId);
+      }
+    } catch (err) {
+      console.warn(LOG, 'Post-queue export failed:', err.message);
+    }
   }
+
+  console.log(LOG, `Queue finished (${reason}):`, summary);
 }

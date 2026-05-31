@@ -32,18 +32,44 @@ const galleryStats = $('galleryStats');
 const galleryList = $('galleryList');
 const scanBtn = $('scanBtn');
 const downloadAllBtn = $('downloadAllBtn');
+const projectAssetInfo = $('projectAssetInfo');
+const promptTemplateInput = $('promptTemplate');
+const stylePrefixInput = $('stylePrefix');
+const characterLibraryInput = $('characterLibrary');
+const referenceUpload = $('referenceUpload');
+const referenceList = $('referenceList');
+const saveStudioBtn = $('saveStudioBtn');
+const studioMsg = $('studioMsg');
+const exportProjectNameInput = $('exportProjectName');
+const exportStats = $('exportStats');
+const exportMetadataBtn = $('exportMetadataBtn');
+const exportZipBtn = $('exportZipBtn');
+const refreshExportBtn = $('refreshExportBtn');
+const exportMsg = $('exportMsg');
+const providerSelect = $('providerSelect');
+const providerHint = $('providerHint');
+const exportMetadataOnComplete = $('exportMetadataOnComplete');
+const exportZipOnComplete = $('exportZipOnComplete');
 
 let queueRunning = false;
 let connectedTabId = null;
 let validatedJobs = [];
 let scannedImages = [];
+let references = [];
+let activeReferenceIds = [];
+let activeProviderId = 'gemini';
+let providers = [];
 
 document.addEventListener('DOMContentLoaded', async () => {
   await restoreState();
+  await loadProviders();
+  await loadStudioConfig();
+  await loadReferences();
   initTabs();
   bindEvents();
-  checkGeminiConnection();
+  checkProviderConnection();
   refreshQueueState();
+  refreshProjectInfo();
   chrome.runtime.onMessage.addListener(handleRuntimeMessage);
 });
 
@@ -55,6 +81,7 @@ function initTabs() {
       document.querySelectorAll('.tab-panel').forEach((p) => p.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(tabId)?.classList.add('active');
+      if (tabId === 'export') refreshExportInfo();
     });
   });
 }
@@ -66,10 +93,15 @@ function bindEvents() {
   retryFailedBtn.addEventListener('click', retryFailed);
   scanBtn.addEventListener('click', scanGallery);
   downloadAllBtn.addEventListener('click', downloadAllFromChat);
+  saveStudioBtn.addEventListener('click', saveStudioConfig);
+  referenceUpload.addEventListener('change', handleReferenceUpload);
+  exportMetadataBtn.addEventListener('click', exportMetadata);
+  exportZipBtn.addEventListener('click', exportZip);
+  refreshExportBtn.addEventListener('click', refreshExportInfo);
 
   openGeminiBtn.addEventListener('click', () => {
-    chrome.runtime.sendMessage({ type: 'OPEN_GEMINI' });
-    setTimeout(checkGeminiConnection, 2500);
+    chrome.runtime.sendMessage({ type: 'OPEN_PROVIDER', providerId: activeProviderId });
+    setTimeout(checkProviderConnection, 2500);
   });
 
   sceneInput.addEventListener('input', () => {
@@ -81,11 +113,61 @@ function bindEvents() {
     }
   });
 
-  [maxRetriesInput, failureRetryMaxInput, jobDelaySecInput, generationTimeoutSecInput, projectNameInput].forEach(
-    (el) => {
-      if (el) el.addEventListener('change', persistSettings);
+  projectNameInput.addEventListener('change', () => {
+    persistSettings();
+    refreshProjectInfo();
+    if (exportProjectNameInput && !exportProjectNameInput.value) {
+      exportProjectNameInput.value = projectNameInput.value;
     }
-  );
+  });
+
+  [
+    maxRetriesInput,
+    failureRetryMaxInput,
+    jobDelaySecInput,
+    generationTimeoutSecInput,
+    projectNameInput,
+    providerSelect,
+    exportMetadataOnComplete,
+    exportZipOnComplete,
+  ].forEach((el) => {
+    if (el) el.addEventListener('change', persistSettings);
+  });
+
+  if (providerSelect) {
+    providerSelect.addEventListener('change', () => {
+      activeProviderId = providerSelect.value;
+      persistSettings();
+      checkProviderConnection();
+    });
+  }
+}
+
+async function loadProviders() {
+  const response = await chrome.runtime.sendMessage({ type: 'GET_PROVIDERS' });
+  providers = response?.providers || [];
+
+  if (!providerSelect) return;
+
+  providerSelect.innerHTML = providers
+    .map(
+      (p) =>
+        `<option value="${escapeHtml(p.id)}" ${p.status !== 'active' ? 'disabled' : ''}>${escapeHtml(p.name)}${p.status !== 'active' ? ` (${p.status})` : ''}</option>`
+    )
+    .join('');
+
+  const active = providers.find((p) => p.id === activeProviderId && p.status === 'active');
+  if (!active) {
+    activeProviderId = providers.find((p) => p.status === 'active')?.id || 'gemini';
+    providerSelect.value = activeProviderId;
+  }
+
+  if (providerHint) {
+    const planned = providers.filter((p) => p.status !== 'active').map((p) => p.name);
+    providerHint.textContent = planned.length
+      ? `${providers.filter((p) => p.status === 'active').map((p) => p.name).join(', ')} active. Planned: ${planned.join(', ')}.`
+      : 'Gemini and ChatGPT are supported for batch image generation.';
+  }
 }
 
 async function restoreState() {
@@ -94,19 +176,32 @@ async function restoreState() {
       'lastSceneInput',
       'projectName',
       'galleryProjectName',
+      'exportProjectName',
       'maxRetries',
       'failureRetryMax',
       'jobDelaySec',
       'generationTimeoutSec',
+      'activeProviderId',
+      'exportMetadataOnComplete',
+      'exportZipOnComplete',
     ]);
     if (stored.lastSceneInput) sceneInput.value = stored.lastSceneInput;
     if (stored.projectName) projectNameInput.value = stored.projectName;
     if (stored.galleryProjectName) galleryProjectNameInput.value = stored.galleryProjectName;
+    if (stored.exportProjectName) exportProjectNameInput.value = stored.exportProjectName;
+    else if (stored.projectName) exportProjectNameInput.value = stored.projectName;
     if (stored.maxRetries != null) maxRetriesInput.value = stored.maxRetries;
     if (stored.failureRetryMax != null) failureRetryMaxInput.value = stored.failureRetryMax;
     if (stored.jobDelaySec != null) jobDelaySecInput.value = stored.jobDelaySec;
     if (stored.generationTimeoutSec != null) {
       generationTimeoutSecInput.value = stored.generationTimeoutSec;
+    }
+    if (stored.activeProviderId) activeProviderId = stored.activeProviderId;
+    if (exportMetadataOnComplete) {
+      exportMetadataOnComplete.checked = stored.exportMetadataOnComplete !== false;
+    }
+    if (exportZipOnComplete) {
+      exportZipOnComplete.checked = !!stored.exportZipOnComplete;
     }
   } catch (_) {}
 }
@@ -117,11 +212,16 @@ async function persistSettings() {
       lastSceneInput: sceneInput.value,
       projectName: projectNameInput.value,
       galleryProjectName: galleryProjectNameInput.value,
+      exportProjectName: exportProjectNameInput?.value || '',
       maxRetries: Number(maxRetriesInput.value),
       failureRetryMax: Number(failureRetryMaxInput?.value ?? 3),
       jobDelaySec: Number(jobDelaySecInput.value),
       generationTimeoutSec: Number(generationTimeoutSecInput.value),
+      activeProviderId: providerSelect?.value || activeProviderId,
+      exportMetadataOnComplete: exportMetadataOnComplete?.checked !== false,
+      exportZipOnComplete: !!exportZipOnComplete?.checked,
     });
+    activeProviderId = providerSelect?.value || activeProviderId;
   } catch (_) {}
 }
 
@@ -131,8 +231,221 @@ function getSettings() {
     failureRetryMax: Math.max(0, Math.min(20, Number(failureRetryMaxInput?.value) || 3)),
     jobDelaySec: Math.max(0, Math.min(300, Number(jobDelaySecInput.value) || 8)),
     generationTimeoutSec: Math.max(30, Math.min(600, Number(generationTimeoutSecInput.value) || 180)),
+    providerId: providerSelect?.value || activeProviderId,
+    exportMetadataOnComplete: exportMetadataOnComplete?.checked !== false,
+    exportZipOnComplete: !!exportZipOnComplete?.checked,
     concurrency: 1,
   };
+}
+
+async function loadStudioConfig() {
+  const response = await chrome.runtime.sendMessage({ type: 'GET_STUDIO_CONFIG' });
+  if (!response?.ok) return;
+
+  const config = response.config;
+  if (promptTemplateInput && config.promptTemplate) {
+    promptTemplateInput.value = config.promptTemplate;
+  }
+  if (stylePrefixInput) stylePrefixInput.value = config.stylePrefix || '';
+  if (characterLibraryInput && config.characterLibrary) {
+    characterLibraryInput.value = JSON.stringify(config.characterLibrary, null, 2);
+  }
+  activeReferenceIds = config.activeReferenceIds || [];
+}
+
+async function saveStudioConfig() {
+  let characterLibrary = {};
+  try {
+    characterLibrary = JSON.parse(characterLibraryInput.value || '{}');
+  } catch (err) {
+    showStudioMsg('error', `Invalid character JSON: ${err.message}`);
+    return;
+  }
+
+  const response = await chrome.runtime.sendMessage({
+    type: 'SAVE_STUDIO_CONFIG',
+    config: {
+      promptTemplate: promptTemplateInput.value,
+      stylePrefix: stylePrefixInput.value,
+      characterLibrary,
+      activeReferenceIds,
+    },
+  });
+
+  if (response?.ok) {
+    showStudioMsg('valid', 'Studio config saved.');
+  } else {
+    showStudioMsg('error', response?.error || 'Save failed.');
+  }
+}
+
+function showStudioMsg(type, message) {
+  if (!studioMsg) return;
+  studioMsg.className = `validation-msg ${type}`;
+  studioMsg.textContent = message;
+}
+
+async function loadReferences() {
+  const response = await chrome.runtime.sendMessage({ type: 'LIST_REFERENCES' });
+  references = response?.references || [];
+  renderReferenceList();
+}
+
+async function handleReferenceUpload(event) {
+  const files = event.target.files;
+  if (!files?.length) return;
+
+  for (const file of files) {
+    const dataUrl = await readFileAsDataUrl(file);
+    const response = await chrome.runtime.sendMessage({
+      type: 'SAVE_REFERENCE',
+      name: file.name,
+      mime: file.type,
+      dataUrl,
+    });
+    if (response?.ok) {
+      references.push(response.reference);
+      if (!activeReferenceIds.includes(response.reference.id)) {
+        activeReferenceIds.push(response.reference.id);
+      }
+    }
+  }
+
+  referenceUpload.value = '';
+  renderReferenceList();
+  await saveStudioConfig();
+}
+
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+}
+
+function renderReferenceList() {
+  if (!referenceList) return;
+
+  if (!references.length) {
+    referenceList.innerHTML = '<li class="ref-item"><span>No reference images uploaded.</span></li>';
+    return;
+  }
+
+  referenceList.innerHTML = references
+    .map(
+      (ref) => `
+    <li class="ref-item">
+      <label>
+        <input type="checkbox" data-ref-id="${escapeHtml(ref.id)}" ${activeReferenceIds.includes(ref.id) ? 'checked' : ''} />
+        ${escapeHtml(ref.name)}
+      </label>
+      <button class="ref-delete" data-delete-ref="${escapeHtml(ref.id)}">Delete</button>
+    </li>`
+    )
+    .join('');
+
+  referenceList.querySelectorAll('input[type="checkbox"]').forEach((cb) => {
+    cb.addEventListener('change', async () => {
+      const id = cb.dataset.refId;
+      if (cb.checked) {
+        if (!activeReferenceIds.includes(id)) activeReferenceIds.push(id);
+      } else {
+        activeReferenceIds = activeReferenceIds.filter((x) => x !== id);
+      }
+      await saveStudioConfig();
+    });
+  });
+
+  referenceList.querySelectorAll('[data-delete-ref]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const id = btn.dataset.deleteRef;
+      await chrome.runtime.sendMessage({ type: 'DELETE_REFERENCE', id });
+      references = references.filter((r) => r.id !== id);
+      activeReferenceIds = activeReferenceIds.filter((x) => x !== id);
+      renderReferenceList();
+      await saveStudioConfig();
+    });
+  });
+}
+
+async function refreshProjectInfo() {
+  const projectName = projectNameInput.value.trim();
+  if (!projectName || !projectAssetInfo) return;
+
+  const info = await chrome.runtime.sendMessage({ type: 'GET_PROJECT_INFO', projectName });
+  if (info?.ok) {
+    projectAssetInfo.textContent = `${info.assetCount} stored asset(s) in "${info.projectName}".`;
+  }
+}
+
+async function refreshExportInfo() {
+  const projectName = exportProjectNameInput?.value.trim() || projectNameInput.value.trim();
+  if (!projectName) {
+    exportStats.textContent = 'Enter a project name to see stored assets.';
+    return;
+  }
+
+  const info = await chrome.runtime.sendMessage({ type: 'GET_PROJECT_INFO', projectName });
+  if (!info?.ok) {
+    exportStats.textContent = info?.error || 'Could not load project info.';
+    return;
+  }
+
+  exportStats.textContent = `${info.assetCount} image(s) stored for "${info.projectName}". Ready for ZIP/metadata export.`;
+}
+
+async function exportMetadata() {
+  const projectName = exportProjectNameInput?.value.trim() || projectNameInput.value.trim();
+  if (!projectName) {
+    showExportMsg('error', 'Enter a project name.');
+    return;
+  }
+
+  exportMetadataBtn.disabled = true;
+  const response = await chrome.runtime.sendMessage({
+    type: 'EXPORT_METADATA',
+    projectName,
+    providerId: activeProviderId,
+  });
+  exportMetadataBtn.disabled = false;
+
+  if (response?.ok) {
+    showExportMsg('valid', `Metadata JSON exported for ${response.sceneCount} scene(s).`);
+  } else {
+    showExportMsg('error', response?.error || 'Export failed.');
+  }
+}
+
+async function exportZip() {
+  const projectName = exportProjectNameInput?.value.trim() || projectNameInput.value.trim();
+  if (!projectName) {
+    showExportMsg('error', 'Enter a project name.');
+    return;
+  }
+
+  exportZipBtn.disabled = true;
+  showExportMsg('', 'Building ZIP…');
+
+  const response = await chrome.runtime.sendMessage({
+    type: 'EXPORT_ZIP',
+    projectName,
+    providerId: activeProviderId,
+  });
+  exportZipBtn.disabled = false;
+
+  if (response?.ok) {
+    showExportMsg('valid', `ZIP download started for "${projectName}".`);
+  } else {
+    showExportMsg('error', response?.error || 'ZIP export failed.');
+  }
+}
+
+function showExportMsg(type, message) {
+  if (!exportMsg) return;
+  exportMsg.className = type ? `validation-msg ${type}` : 'validation-msg';
+  exportMsg.textContent = message;
 }
 
 function updateRetryFailedButton(state) {
@@ -142,14 +455,27 @@ function updateRetryFailedButton(state) {
   retryFailedBtn.disabled = queueRunning || failedCount === 0;
 }
 
-async function checkGeminiConnection() {
-  setConnectionState('checking', 'Checking Gemini connection…');
+async function checkProviderConnection() {
+  const provider = providers.find((p) => p.id === activeProviderId) || {
+    name: 'Gemini',
+    urlPatterns: ['https://gemini.google.com/*'],
+  };
+  setConnectionState('checking', `Checking ${provider.name} connection…`);
 
   try {
-    const tabs = await chrome.tabs.query({ url: 'https://gemini.google.com/*' });
+    const patterns = provider.urlPatterns?.length
+      ? provider.urlPatterns
+      : [provider.urlPattern || 'https://gemini.google.com/*'];
+
+    let tabs = [];
+    for (const pattern of patterns) {
+      const found = await chrome.tabs.query({ url: pattern });
+      tabs = tabs.concat(found);
+    }
+
     if (!tabs.length) {
       connectedTabId = null;
-      setConnectionState('error', 'No Gemini tab found. Click Open to launch it.');
+      setConnectionState('error', `No ${provider.name} tab found. Click Open to launch it.`);
       return;
     }
 
@@ -157,14 +483,27 @@ async function checkGeminiConnection() {
     connectedTabId = tab.id;
 
     try {
-      const response = await chrome.tabs.sendMessage(tab.id, { type: 'PING' });
+      const response = await chrome.tabs.sendMessage(tab.id, {
+        type: 'PING',
+        providerId: activeProviderId,
+      });
       if (response?.alive) {
-        setConnectionState('connected', `Connected · Tab #${tab.id}`);
+        setConnectionState(
+          'connected',
+          `Connected · ${response.providerName || provider.name} · Tab #${tab.id}`
+        );
+        return;
+      }
+      if (response?.providerId && response.providerId !== activeProviderId) {
+        setConnectionState(
+          'error',
+          `Wrong site open (${response.providerName}). Switch provider or open ${provider.name}.`
+        );
         return;
       }
     } catch (_) {}
 
-    setConnectionState('error', 'Gemini tab found but script not ready. Reload the page.');
+    setConnectionState('error', `${provider.name} tab found but script not ready. Reload the page.`);
   } catch (err) {
     setConnectionState('error', `Connection error: ${err.message}`);
   }
@@ -269,9 +608,10 @@ async function startQueue() {
   const parsed = validateInput();
   if (!parsed) return;
 
-  await checkGeminiConnection();
+  await saveStudioConfig();
+  await checkProviderConnection();
   if (!connectedTabId) {
-    showValidation('error', 'No Gemini tab available.');
+    showValidation('error', 'No provider tab available.');
     return;
   }
 
@@ -290,6 +630,7 @@ async function startQueue() {
     payload: {
       rawInput: sceneInput.value,
       projectName: projectNameInput.value.trim() || parsed.projectName,
+      providerId: activeProviderId,
       settings: getSettings(),
       tabId: connectedTabId,
     },
@@ -309,9 +650,9 @@ function stopQueue() {
 async function retryFailed() {
   if (queueRunning) return;
 
-  await checkGeminiConnection();
+  await checkProviderConnection();
   if (!connectedTabId) {
-    showValidation('error', 'No Gemini tab available.');
+    showValidation('error', 'No provider tab available.');
     return;
   }
 
@@ -353,9 +694,9 @@ async function refreshQueueState() {
 }
 
 async function scanGallery() {
-  await checkGeminiConnection();
+  await checkProviderConnection();
   if (!connectedTabId) {
-    galleryStats.textContent = 'No Gemini tab connected.';
+    galleryStats.textContent = 'No provider tab connected.';
     return;
   }
 
@@ -368,7 +709,7 @@ async function scanGallery() {
     galleryStats.textContent =
       scannedImages.length > 0
         ? `${scannedImages.length} image(s) found in current chat.`
-        : 'No images found. Generate some images in Gemini first.';
+        : 'No images found. Generate some images first.';
     downloadAllBtn.disabled = scannedImages.length === 0;
     renderGalleryList(scannedImages);
   } catch (err) {
@@ -400,9 +741,9 @@ function renderGalleryList(images) {
 }
 
 async function downloadAllFromChat() {
-  await checkGeminiConnection();
+  await checkProviderConnection();
   if (!connectedTabId) {
-    galleryStats.textContent = 'No Gemini tab connected.';
+    galleryStats.textContent = 'No provider tab connected.';
     return;
   }
 
@@ -417,10 +758,12 @@ async function downloadAllFromChat() {
     const result = await chrome.tabs.sendMessage(connectedTabId, {
       type: 'DOWNLOAD_ALL_IMAGES',
       projectName,
+      providerId: activeProviderId,
     });
 
     if (result?.ok) {
       galleryStats.textContent = `Downloaded ${result.count} image(s) to "${projectName}/".`;
+      refreshProjectInfo();
     } else {
       galleryStats.textContent = result?.error || 'Download failed.';
     }
@@ -443,6 +786,8 @@ function handleRuntimeMessage(message) {
       finishQueueUi(formatFinishMessage(message), message.reason !== 'completed');
       renderQueueState(message.state);
       updateRetryFailedButton(message.state);
+      refreshProjectInfo();
+      refreshExportInfo();
       break;
     default:
       break;
@@ -453,9 +798,9 @@ function formatFinishMessage(message) {
   const { summary, reason } = message;
   if (reason === 'stopped') return 'Queue stopped by user.';
   if (summary.failed) {
-    return `Queue finished: ${summary.done}/${summary.total} succeeded, ${summary.failed} failed.`;
+    return `Queue finished: ${summary.done}/${summary.total} succeeded, ${summary.failed} failed. Metadata exported if enabled.`;
   }
-  return `Queue complete! ${summary.done}/${summary.total} images downloaded.`;
+  return `Queue complete! ${summary.done}/${summary.total} images downloaded. Metadata exported if enabled.`;
 }
 
 function finishQueueUi(message, isError) {
