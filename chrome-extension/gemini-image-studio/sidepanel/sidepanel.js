@@ -456,57 +456,47 @@ function updateRetryFailedButton(state) {
 }
 
 async function checkProviderConnection() {
-  const provider = providers.find((p) => p.id === activeProviderId) || {
-    name: 'Gemini',
-    urlPatterns: ['https://gemini.google.com/*'],
-  };
-  setConnectionState('checking', `Checking ${provider.name} connection…`);
+  setConnectionState('checking', 'Checking Gemini / ChatGPT connection…');
+  updateOpenButtonLabel();
 
   try {
-    const patterns = provider.urlPatterns?.length
-      ? provider.urlPatterns
-      : [provider.urlPattern || 'https://gemini.google.com/*'];
+    const result = await chrome.runtime.sendMessage({
+      type: 'FIND_PROVIDER_TAB',
+      preferredProviderId: activeProviderId,
+      preferredTabId: connectedTabId,
+    });
 
-    let tabs = [];
-    for (const pattern of patterns) {
-      const found = await chrome.tabs.query({ url: pattern });
-      tabs = tabs.concat(found);
-    }
-
-    if (!tabs.length) {
+    if (!result?.ok) {
       connectedTabId = null;
-      setConnectionState('error', `No ${provider.name} tab found. Click Open to launch it.`);
+      setConnectionState('error', result?.error || 'No provider tab found.');
       return;
     }
 
-    const tab = tabs[0];
-    connectedTabId = tab.id;
+    connectedTabId = result.tabId;
 
-    try {
-      const response = await chrome.tabs.sendMessage(tab.id, {
-        type: 'PING',
-        providerId: activeProviderId,
-      });
-      if (response?.alive) {
-        setConnectionState(
-          'connected',
-          `Connected · ${response.providerName || provider.name} · Tab #${tab.id}`
-        );
-        return;
-      }
-      if (response?.providerId && response.providerId !== activeProviderId) {
-        setConnectionState(
-          'error',
-          `Wrong site open (${response.providerName}). Switch provider or open ${provider.name}.`
-        );
-        return;
-      }
-    } catch (_) {}
+    if (result.autoSwitched && result.providerId !== activeProviderId) {
+      activeProviderId = result.providerId;
+      if (providerSelect) providerSelect.value = activeProviderId;
+      persistSettings();
+    }
 
-    setConnectionState('error', `${provider.name} tab found but script not ready. Reload the page.`);
+    setConnectionState(
+      'connected',
+      `Connected · ${result.providerName} · Tab #${result.tabId}${result.autoSwitched ? ' (auto-detected)' : ''}`
+    );
+    updateOpenButtonLabel();
   } catch (err) {
+    connectedTabId = null;
     setConnectionState('error', `Connection error: ${err.message}`);
   }
+}
+
+function updateOpenButtonLabel() {
+  if (!openGeminiBtn) return;
+  const provider = providers.find((p) => p.id === activeProviderId);
+  const name = provider?.name || 'Provider';
+  openGeminiBtn.title = `Open ${name}`;
+  openGeminiBtn.textContent = 'Open';
 }
 
 function setConnectionState(state, text) {

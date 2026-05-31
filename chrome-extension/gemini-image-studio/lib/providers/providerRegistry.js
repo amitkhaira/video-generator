@@ -59,6 +59,21 @@ const ProviderRegistry = (() => {
     return null;
   }
 
+  async function resolveAnyTabId(preferredTabId, preferredProviderId) {
+    const preferred = await resolveTabId(preferredTabId, preferredProviderId || 'gemini');
+    if (preferred) {
+      return { tabId: preferred, providerId: preferredProviderId || 'gemini' };
+    }
+
+    for (const provider of listActive()) {
+      if (provider.id === preferredProviderId) continue;
+      const tabId = await resolveTabId(null, provider.id);
+      if (tabId) return { tabId, providerId: provider.id };
+    }
+
+    return { tabId: null, providerId: preferredProviderId || 'gemini' };
+  }
+
   async function openProvider(providerId) {
     const provider = get(providerId);
 
@@ -89,6 +104,7 @@ const ProviderRegistry = (() => {
     getUrlPatterns,
     matchProviderForUrl,
     resolveTabId,
+    resolveAnyTabId,
     openProvider,
   };
 })();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Gemini Image Studio",
-  "version": "2.1.0",
+  "version": "2.1.2",
   "description": "AI image production studio — batch Gemini generation, ZIP export, character consistency, templates, multi-provider ready.",
   "icons": {
     "16": "icons/icon.svg",
@@ -23,6 +23,7 @@
       "matches": [
         "https://gemini.google.com/*",
         "https://chatgpt.com/*",
+        "https://www.chatgpt.com/*",
         "https://chat.openai.com/*"
       ],
       "js": [
@@ -45,6 +46,7 @@
   "host_permissions": [
     "https://gemini.google.com/*",
     "https://chatgpt.com/*",
+    "https://www.chatgpt.com/*",
     "https://chat.openai.com/*",
     "https://*.googleusercontent.com/*",
     "https://lh3.googleusercontent.com/*",

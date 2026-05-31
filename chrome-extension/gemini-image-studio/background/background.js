@@ -108,6 +108,13 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
       break;
     }
 
+    case 'FIND_PROVIDER_TAB': {
+      findProviderTab(message.preferredProviderId, message.preferredTabId)
+        .then((result) => sendResponse(result))
+        .catch((err) => sendResponse({ ok: false, error: err.message }));
+      return true;
+    }
+
     case 'GET_STUDIO_CONFIG': {
       PromptEngine.loadStudioConfig()
         .then((config) => sendResponse({ ok: true, config }))
@@ -405,6 +412,66 @@ function updateJobStatus(jobId, status, extra = {}) {
   }
 }
 
+async function injectContentScript(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: [
+      'lib/providers/geminiProvider.js',
+      'lib/providers/chatgptProvider.js',
+      'content/content.js',
+    ],
+  });
+}
+
+async function pingTab(tabId, providerId) {
+  return chrome.tabs.sendMessage(tabId, { type: 'PING', providerId });
+}
+
+async function findProviderTab(preferredProviderId, preferredTabId) {
+  const activeProviders = ProviderRegistry.listActive();
+  const preferredId = preferredProviderId || 'gemini';
+  const ordered = [
+    ...activeProviders.filter((p) => p.id === preferredId),
+    ...activeProviders.filter((p) => p.id !== preferredId),
+  ];
+
+  for (const provider of ordered) {
+    const tabId = await ProviderRegistry.resolveTabId(
+      provider.id === preferredId ? preferredTabId : null,
+      provider.id
+    );
+    if (!tabId) continue;
+
+    let ping = null;
+    try {
+      ping = await pingTab(tabId, provider.id);
+    } catch (_) {
+      try {
+        await injectContentScript(tabId);
+        await new Promise((r) => setTimeout(r, 400));
+        ping = await pingTab(tabId, provider.id);
+      } catch (injectErr) {
+        console.warn(LOG, 'Content script inject failed:', injectErr.message);
+      }
+    }
+
+    if (ping?.alive && ping?.providerId === provider.id) {
+      return {
+        ok: true,
+        tabId,
+        providerId: provider.id,
+        providerName: provider.name,
+        autoSwitched: provider.id !== preferredId,
+      };
+    }
+  }
+
+  return {
+    ok: false,
+    error: 'No Gemini or ChatGPT tab found. Open gemini.google.com or chatgpt.com.',
+  };
+}
+
 async function startQueue(payload) {
   if (queueState.running) throw new Error('Queue is already running.');
 
@@ -419,8 +486,8 @@ async function startQueue(payload) {
     ...(payload.settings || parsed.settings || {}),
   };
 
-  const providerId = payload.providerId || settings.providerId || 'gemini';
-  const provider = ProviderRegistry.get(providerId);
+  let providerId = payload.providerId || settings.providerId || 'gemini';
+  let provider = ProviderRegistry.get(providerId);
   if (provider.status !== 'active') {
     throw new Error(`Provider "${provider.name}" is not available yet (${provider.status}).`);
   }
@@ -437,9 +504,23 @@ async function startQueue(payload) {
     parsed.projectName ||
     'gemini_project';
 
-  const tabId = await ProviderRegistry.resolveTabId(payload.tabId, providerId);
+  const resolved = await ProviderRegistry.resolveAnyTabId(payload.tabId, providerId);
+  const tabId = resolved.tabId;
   if (!tabId) {
-    throw new Error(`No ${provider.name} tab found. Open ${provider.openUrl} first.`);
+    throw new Error(
+      'No provider tab found. Open https://gemini.google.com or https://chatgpt.com first.'
+    );
+  }
+
+  if (resolved.providerId !== providerId) {
+    providerId = resolved.providerId;
+    provider = ProviderRegistry.get(providerId);
+    if (provider.jobDelaySec && !payload.settings?.jobDelaySec) {
+      settings.jobDelaySec = provider.jobDelaySec;
+    }
+    if (provider.generationTimeoutSec && !payload.settings?.generationTimeoutSec) {
+      settings.generationTimeoutSec = provider.generationTimeoutSec;
+    }
   }
 
   const referenceData = await loadReferenceData(studioConfig.activeReferenceIds);

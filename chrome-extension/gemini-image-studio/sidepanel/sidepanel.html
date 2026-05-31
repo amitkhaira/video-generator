@@ -16,14 +16,14 @@
     </svg>
     <div class="header-text">
       <h1>Gemini Image Studio</h1>
-      <p class="header-sub">Batch image generation · Project downloads</p>
+      <p class="header-sub">Gemini & ChatGPT · Batch image generation</p>
     </div>
   </header>
 
   <div class="status-bar" id="statusBar">
     <span class="status-dot" id="statusDot" data-state="checking"></span>
-    <span class="status-text" id="statusText">Checking Gemini connection…</span>
-    <button class="status-open-btn" id="openGeminiBtn" title="Open Gemini">Open</button>
+    <span class="status-text" id="statusText">Checking Gemini / ChatGPT connection…</span>
+    <button class="status-open-btn" id="openGeminiBtn" title="Open provider">Open</button>
   </div>
 
   <nav class="tabs">
@@ -126,7 +126,7 @@ Empty corridor lit by flickering bulb…'></textarea>
       <label class="field-label">Reference images</label>
       <input type="file" id="referenceUpload" accept="image/*" multiple class="file-input" />
       <ul class="ref-list" id="referenceList"></ul>
-      <p class="field-hint">Selected references are uploaded to Gemini before each scene prompt.</p>
+      <p class="field-hint">Selected references are uploaded before each scene prompt.</p>
     </div>
 
     <div class="action-row">
@@ -165,7 +165,7 @@ Empty corridor lit by flickering bulb…'></textarea>
   </section>
 
   <section class="tab-panel" id="gallery">
-    <p class="gallery-intro">Download every generated image visible in the current Gemini chat.</p>
+    <p class="gallery-intro">Download every generated image visible in the current chat (Gemini or ChatGPT).</p>
 
     <div class="field-group">
       <label class="field-label" for="galleryProjectName">Export folder</label>
@@ -187,7 +187,7 @@ Empty corridor lit by flickering bulb…'></textarea>
       <div class="field-group">
         <label class="field-label" for="providerSelect">Image provider</label>
         <select id="providerSelect" class="text-input"></select>
-        <p class="field-hint" id="providerHint">Only Gemini is active. Others are planned.</p>
+        <p class="field-hint" id="providerHint">Works on gemini.google.com and chatgpt.com</p>
       </div>
       <div class="field-group">
         <label class="field-label" for="maxRetries">Max retries per scene</label>
@@ -204,7 +204,7 @@ Empty corridor lit by flickering bulb…'></textarea>
       <div class="field-group">
         <label class="field-label" for="generationTimeoutSec">Generation timeout (sec)</label>
         <input type="number" id="generationTimeoutSec" class="text-input" min="30" max="600" value="180" />
-        <p class="field-hint">How long to wait for Gemini to finish generating each image.</p>
+        <p class="field-hint">How long to wait for image generation to finish.</p>
       </div>
       <div class="field-group">
         <label class="checkbox-row">
@@ -287,7 +287,7 @@ Scene 2,Aman,"Empty corridor lit by flickering bulb…"</pre>
 
       <h3>Tips</h3>
       <ul>
-        <li>Keep one Gemini tab open during batch runs</li>
+        <li>Keep one provider tab open during batch runs (Gemini or ChatGPT)</li>
         <li>Use descriptive scene names for auto file naming</li>
         <li>Use the Gallery tab to bulk-export an existing chat</li>
       </ul>

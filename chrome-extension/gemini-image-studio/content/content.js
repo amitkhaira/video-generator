@@ -100,13 +100,110 @@
     }).catch(() => {});
   }
 
-  function queryFirst(selectors, root = document) {
+  function queryFirst(selectors, root = document, { requireVisible = true } = {}) {
     const list = Array.isArray(selectors) ? selectors : [selectors];
     for (const sel of list) {
-      const el = root.querySelector(sel);
-      if (el && isVisible(el)) return el;
+      let el;
+      try {
+        el = root.querySelector(sel);
+      } catch (_) {
+        continue;
+      }
+      if (el && (!requireVisible || isVisible(el))) return el;
     }
     return null;
+  }
+
+  function queryFirstAny(selectors, root = document) {
+    return queryFirst(selectors, root, { requireVisible: false });
+  }
+
+  function isChatGPT(provider) {
+    return provider?.id === 'chatgpt';
+  }
+
+  function isExcludedChatGPTButton(btn, provider) {
+    const label = (btn.getAttribute('aria-label') || btn.textContent || '').toLowerCase();
+    const excluded = provider.excludedSendLabels || ChatGPTProvider.excludedSendLabels || [];
+    return excluded.some((part) => label.includes(part));
+  }
+
+  function findPromptEditor(provider) {
+    if (isChatGPT(provider)) {
+      const editor = queryFirst(provider.selectors.promptEditor);
+      if (editor && editor.tagName !== 'TEXTAREA') return editor;
+
+      const pm = document.querySelector('#prompt-textarea.ProseMirror, div#prompt-textarea[contenteditable="true"]');
+      if (pm && isVisible(pm)) return pm;
+    }
+
+    const editor = queryFirst(provider.selectors.promptEditor);
+    if (editor) return editor;
+
+    if (isChatGPT(provider)) {
+      const editables = document.querySelectorAll('form[data-type="unified-composer"] div[contenteditable="true"]');
+      for (const el of editables) {
+        if (!isVisible(el)) continue;
+        const rect = el.getBoundingClientRect();
+        if (rect.height >= 20 && rect.width >= 80) return el;
+      }
+    }
+
+    return null;
+  }
+
+  function findChatGPTSendButton(provider) {
+    const composer =
+      queryFirst(provider.selectors.composerForm) ||
+      document.querySelector('form[data-type="unified-composer"]');
+    if (!composer) return null;
+
+    for (const sel of provider.selectors.sendButton || []) {
+      const btn = composer.querySelector(sel);
+      if (btn && !btn.disabled && isVisible(btn) && !isExcludedChatGPTButton(btn, provider)) {
+        return btn;
+      }
+    }
+
+    const trailing =
+      composer.querySelector('[class*="grid-area:trailing"]') ||
+      composer.querySelector('.\\[grid-area\\:trailing\\]') ||
+      composer;
+
+    const buttons = trailing.querySelectorAll('button:not([disabled])');
+    for (const btn of buttons) {
+      if (!isVisible(btn) || isExcludedChatGPTButton(btn, provider)) continue;
+      const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+      if (label.includes('send')) return btn;
+      if (btn.dataset.testid === 'send-button') return btn;
+    }
+
+    return null;
+  }
+
+  function findSendButton(provider) {
+    if (isChatGPT(provider)) {
+      return findChatGPTSendButton(provider);
+    }
+
+    for (const sel of provider.selectors.sendButton || []) {
+      const btn = document.querySelector(sel);
+      if (btn && isVisible(btn) && !btn.disabled) return btn;
+    }
+
+    return queryFirst(provider.selectors.sendButton);
+  }
+
+  function findFileInput(provider) {
+    return queryFirstAny(provider.selectors.fileInput);
+  }
+
+  function syncChatGPTHiddenTextarea(provider, text) {
+    const hidden = queryFirstAny(provider.selectors.hiddenTextarea || []);
+    if (!hidden) return;
+    hidden.value = text;
+    hidden.dispatchEvent(new Event('input', { bubbles: true }));
+    hidden.dispatchEvent(new Event('change', { bubbles: true }));
   }
 
   function isVisible(el) {
@@ -131,47 +228,17 @@
     throw new Error(`Element not found: ${list[0]}`);
   }
 
-  function findPromptEditor(provider) {
-    const editor = queryFirst(provider.selectors.promptEditor);
-    if (editor) return editor;
-
-    if (provider.id === 'chatgpt') {
-      const editables = document.querySelectorAll('div[contenteditable="true"]');
-      for (const el of editables) {
-        if (!isVisible(el)) continue;
-        const rect = el.getBoundingClientRect();
-        if (rect.height >= 30 && rect.width >= 100) return el;
-      }
-    }
-
-    return null;
-  }
-
-  function findSendButton(provider) {
-    for (const sel of provider.selectors.sendButton || []) {
-      const btn = document.querySelector(sel);
-      if (btn && isVisible(btn) && !btn.disabled) return btn;
-    }
-
-    const editor = findPromptEditor(provider);
-    if (!editor) return null;
-
-    const form = editor.closest('form');
-    if (form) {
-      const buttons = form.querySelectorAll('button:not([disabled])');
-      if (buttons.length) return buttons[buttons.length - 1];
-    }
-
-    return queryFirst(provider.selectors.sendButton);
-  }
-
   function isGenerating(provider) {
     if (queryFirst(provider.selectors.stopButton)) return true;
 
-    if (provider.id === 'chatgpt') {
+    if (isChatGPT(provider)) {
       if (queryFirst(provider.selectors.streamingIndicator)) return true;
-      const busy = document.querySelector('[data-message-author-role="assistant"] [aria-busy="true"]');
+      const busy = document.querySelector(
+        '[data-message-author-role="assistant"] [aria-busy="true"], [data-testid="conversation-turn-content"] [aria-busy="true"]'
+      );
       if (busy) return true;
+      const composer = document.querySelector('form[data-type="unified-composer"]');
+      if (composer?.querySelector('button[data-testid="stop-button"]')) return true;
     }
 
     return false;
@@ -184,9 +251,39 @@
       .replace(/>/g, '&gt;');
   }
 
-  async function fillPromptProseMirror(editor, text, run) {
+  async function fillPromptProseMirror(editor, text, run, provider) {
     editor.focus();
-    await sleep(150, run);
+    await sleep(200, run);
+
+    if (isChatGPT(provider)) {
+      const selection = window.getSelection();
+      const range = document.createRange();
+      range.selectNodeContents(editor);
+      selection.removeAllRanges();
+      selection.addRange(range);
+      document.execCommand('selectAll', false, null);
+      document.execCommand('delete', false, null);
+
+      const lines = String(text).split('\n');
+      lines.forEach((line, index) => {
+        if (index > 0) document.execCommand('insertParagraph', false, null);
+        if (line) document.execCommand('insertText', false, line);
+      });
+
+      if (!editor.textContent.trim()) {
+        editor.innerHTML = `<p>${escapeHtml(text).replace(/\n/g, '</p><p>')}</p>`;
+      }
+
+      editor.dispatchEvent(
+        new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: text })
+      );
+      editor.dispatchEvent(
+        new InputEvent('input', { bubbles: true, cancelable: true, inputType: 'insertText', data: text })
+      );
+      syncChatGPTHiddenTextarea(provider, text);
+      await sleep(600, run);
+      return;
+    }
 
     const selection = window.getSelection();
     const range = document.createRange();
@@ -209,6 +306,49 @@
     await sleep(400, run);
   }
 
+  async function submitChatGPTPrompt(editor, run, provider) {
+    editor.focus();
+    await sleep(300, run);
+
+    let sendBtn = findChatGPTSendButton(provider);
+    for (let i = 0; i < 15 && !sendBtn; i++) {
+      throwIfAborted(run);
+      await sleep(200, run);
+      sendBtn = findChatGPTSendButton(provider);
+    }
+
+    if (sendBtn) {
+      sendBtn.click();
+      await sleep(600, run);
+      return;
+    }
+
+    const enterOpts = {
+      key: 'Enter',
+      code: 'Enter',
+      keyCode: 13,
+      which: 13,
+      bubbles: true,
+      cancelable: true,
+    };
+
+    editor.dispatchEvent(new KeyboardEvent('keydown', enterOpts));
+    editor.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
+    editor.dispatchEvent(new KeyboardEvent('keyup', enterOpts));
+    await sleep(400, run);
+
+    const form =
+      editor.closest('form[data-type="unified-composer"]') ||
+      queryFirst(provider.selectors.composerForm);
+    if (form?.requestSubmit) {
+      try {
+        form.requestSubmit();
+      } catch (_) {}
+    }
+
+    await sleep(600, run);
+  }
+
   async function fillPrompt(text, run, provider) {
     const deadline = Date.now() + 15000;
     let editor = null;
@@ -222,8 +362,8 @@
 
     if (!editor) throw new Error('Prompt editor not found.');
 
-    if (provider.promptFillMode === 'prosemirror' || provider.id === 'chatgpt') {
-      await fillPromptProseMirror(editor, text, run);
+    if (provider.promptFillMode === 'prosemirror' || isChatGPT(provider)) {
+      await fillPromptProseMirror(editor, text, run, provider);
       return;
     }
 
@@ -254,15 +394,20 @@
   }
 
   async function submitPrompt(run, provider) {
+    const editor = findPromptEditor(provider);
+    if (!editor) throw new Error('Prompt editor not found.');
+
+    if (isChatGPT(provider)) {
+      await submitChatGPTPrompt(editor, run, provider);
+      return;
+    }
+
     const sendBtn = await waitForSendButton(provider, run);
     if (sendBtn && !sendBtn.disabled) {
       sendBtn.click();
       await sleep(500, run);
       return;
     }
-
-    const editor = findPromptEditor(provider);
-    if (!editor) throw new Error('Prompt editor not found.');
 
     editor.focus();
     editor.dispatchEvent(
@@ -291,23 +436,29 @@
     for (const ref of referenceImages) {
       throwIfAborted(run);
 
-      let fileInput = queryFirst(provider.selectors.fileInput);
+      let fileInput = findFileInput(provider);
+
+      if (!fileInput && isChatGPT(provider)) {
+        fileInput = document.querySelector('#upload-photos, [data-testid="upload-photos-input"], #upload-files');
+      }
 
       if (!fileInput) {
         const uploadBtn = queryFirst(provider.selectors.uploadButton);
         if (uploadBtn) {
           uploadBtn.click();
-          await sleep(600, run);
+          await sleep(700, run);
 
-          if (provider.selectors.uploadMenuItem) {
-            const menuItem = queryFirst(provider.selectors.uploadMenuItem);
-            if (menuItem) {
-              menuItem.click();
+          const menuItems = document.querySelectorAll('[role="menuitem"], [role="menu"] button');
+          for (const item of menuItems) {
+            const label = (item.textContent || item.getAttribute('aria-label') || '').toLowerCase();
+            if (label.includes('photo') || label.includes('image') || label.includes('file')) {
+              item.click();
               await sleep(400, run);
+              break;
             }
           }
 
-          fileInput = queryFirst(provider.selectors.fileInput);
+          fileInput = findFileInput(provider);
         }
       }
 
@@ -322,7 +473,7 @@
       fileInput.files = dt.files;
       fileInput.dispatchEvent(new Event('change', { bubbles: true }));
       fileInput.dispatchEvent(new Event('input', { bubbles: true }));
-      await sleep(provider.id === 'chatgpt' ? 1200 : 800, run);
+      await sleep(isChatGPT(provider) ? 1500 : 800, run);
     }
   }
 
